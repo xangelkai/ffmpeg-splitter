@@ -1,50 +1,22 @@
 #!/bin/bash
 
-export G_MESSAGES_DEBUG=none
+input_file=$(zenity --file-selection --title="Select input video file" 2>/dev/null)
+[ -z "$input_file" ] && exit 1
 
-for cmd in ffprobe ffmpeg zenity; do
-    command -v "$cmd" >/dev/null 2>&1 || {
-        zenity --error --text="$cmd not found. Please install it before running this script." 2>/dev/null
-        exit 1
-    }
-done
-
-input_file=$(zenity --file-selection --title="Select a video file to split" 2>/dev/null)
-if [[ -z "$input_file" ]]; then
-    zenity --error --text="No file selected. Exiting." 2>/dev/null
-    exit 1
-fi
+target_size_mb=$(zenity --entry --title="Segment size" --text="Enter segment size in MB:" 2>/dev/null)
+[[ ! "$target_size_mb" =~ ^[0-9]+$ ]] && exit 1
 
 bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$input_file")
-if ! [[ "$bitrate" =~ ^[0-9]+$ ]]; then
-    zenity --error --text="Invalid bitrate: '$bitrate'. Cannot continue." 2>/dev/null
-    exit 1
-fi
+[[ ! "$bitrate" =~ ^[0-9]+$ ]] && zenity --error --text="Invalid bitrate: '$bitrate'" 2>/dev/null && exit 1
 
-size_mb=$(zenity --entry --title="Chunk Size" --text="Enter desired chunk size in MB (e.g. 1024):" 2>/dev/null)
-if [[ -z "$size_mb" || "$size_mb" -eq 0 || ! "$size_mb" =~ ^[0-9]+$ ]]; then
-    zenity --error --text="Invalid size. Exiting." 2>/dev/null
-    exit 1
-fi
+target_size_bits=$((target_size_mb * 1024 * 1024 * 8))
+segment_time=$((target_size_bits / bitrate))
 
-size_bits=$((size_mb * 1024 * 1024 * 8))
-segment_time=$((size_bits / bitrate))
+[[ "$segment_time" -le 0 ]] && zenity --error --text="Segment time calculation failed." 2>/dev/null && exit 1
 
-if [[ "$segment_time" -le 0 ]]; then
-    zenity --error --text="Calculated segment time is zero. Size might be too small." 2>/dev/null
-    exit 1
-fi
+base_name=$(basename "$input_file")
+extension="${base_name##*.}"
+name="${base_name%.*}"
+output_prefix="${name}_part_"
 
-zenity --question --width=400 --title="Confirm Split" \
-    --text="📁 File: $input_file\n🎯 Chunk size: ${size_mb} MB\n📈 Bitrate: $bitrate bits/sec\n⏱️ Chunk duration: ~${segment_time} sec\n\nStart splitting?" 2>/dev/null
-
-if [[ $? -ne 0 ]]; then
-    zenity --info --text="Operation cancelled." 2>/dev/null
-    exit 0
-fi
-
-output_prefix="chunk_"
-ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time "$segment_time" \
-       -reset_timestamps 1 "${output_prefix}%03d.mp4"
-
-zenity --info --text="✅ Splitting complete!\nFiles saved as: ${output_prefix}###.mp4" 2>/dev/null
+ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time "$segment_time" -reset_timestamps 1 "${output_prefix}%03d.${extension}"
