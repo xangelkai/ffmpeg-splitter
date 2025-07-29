@@ -17,6 +17,7 @@ segment_time=$((target_size_bits / bitrate))
 base_name=$(basename "$input_file")
 extension="${base_name##*.}"
 name="${base_name%.*}"
-output_prefix="${name}_part_"
+input_dir=$(dirname "$input_file")
+output_prefix="${input_dir}/${name}_part_"
 
 ffmpeg -i "$input_file" -c copy -map 0 -f segment -segment_time "$segment_time" -reset_timestamps 1 "${output_prefix}%03d.${extension}"
